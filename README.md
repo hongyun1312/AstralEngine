@@ -16,6 +16,22 @@
 
 > **比 UE5 更快地加载和运行超大规模虚拟世界 —— 这是我们的核心承诺。**
 
+## 📖 目录
+
+- [🤔 为什么还需要另一个引擎？](#-为什么还需要另一个引擎)
+- [⚡ HyperStream：我们的杀手锏](#-hyperstream我们的杀手锏)
+- [🏗️ 架构总览](#️-架构总览)
+- [🛠️ 技术栈](#️-技术栈)
+- [✨ 核心功能](#-核心功能)
+- [📂 项目结构](#-项目结构)
+- [🚀 快速开始](#-快速开始)
+- [🗺️ 路线图](#️-路线图)
+- [🤝 贡献指南](#-贡献指南)
+- [📄 许可证](#-许可证)
+- [🙏 致谢](#-致谢)
+
+---
+
 ## 🤔 为什么还需要另一个引擎？
 
 UE5 是伟大的。Nanite 的虚拟几何、Lumen 的动态全局光照——它们定义了实时渲染的新高度。
@@ -23,6 +39,28 @@ UE5 是伟大的。Nanite 的虚拟几何、Lumen 的动态全局光照——它
 但它有一个**无法解决的痛点**：当你需要加载和运行一个 100km² 的超大地图时，UE5 的 World Partition 会让你等 8-15 秒才能进入场景；高速飞行时，Chunk 切换会产生 50-200ms 的可感知卡顿；显存占用轻轻松松超过 8GB。
 
 **为什么呢？** 因为 UE5 必须同时兼容 HDD 和 NVMe、PC 和主机、实时编辑和离线烘焙、Nanite 和传统网格、多人协作和历史资产。它是"所有人的所有事"——这是它的强大之处，也是它的性能瓶颈所在。
+
+```mermaid
+graph LR
+    subgraph UE5["UE5 World Partition 的包袱"]
+        A[HDD 兼容] --> E[性能妥协]
+        B[主机适配] --> E
+        C[Nanite/Lumen 耦合] --> E
+        D[多人协作编辑] --> E
+        F[历史资产兼容] --> E
+        G[跨平台一致性] --> E
+    end
+    
+    subgraph Astral["星穹引擎 HyperStream"]
+        H[NVMe SSD 专用] --> K[极致优化]
+        I[PC 单平台] --> K
+        J[极简 Chunk 格式] --> K
+        L[无历史包袱] --> K
+    end
+    
+    style E fill:#ff6b6b
+    style K fill:#51cf66
+```
 
 **星穹引擎走了另一条路。** 我们从零设计，只做一件事：
 
@@ -36,27 +74,56 @@ HyperStream 是星穹引擎独有的超大地图流式加载系统。它不是 U
 
 ### 四大核心技术
 
+```mermaid
+graph TB
+    subgraph HyperStream["⚡ HyperStream 架构"]
+        direction TB
+        
+        subgraph Core["四大核心模块"]
+            A["📦 极简 Chunk 格式<br/>64B Header<br/>Zstd 分块压缩<br/>LOD 独立压缩<br/>XXH64 校验<br/>预计算优先级图"]
+            B["⚡ 激进异步 I/O<br/>io_uring / IOCP<br/>Direct I/O 绕过缓存<br/>256 并发提交<br/>零拷贝传输<br/>GPU 端解压"]
+            C["🗄️ 三级缓存系统<br/>L1 热 · VRAM 2-4GB<br/>L2 温 · VRAM 2-4GB<br/>L3 冷 · RAM 1-2GB<br/>激进淘汰 · Mip 自适应"]
+            D["🔮 预测预加载引擎<br/>卡尔曼滤波 2秒预测<br/>5档速度自适应<br/>离线优先级图<br/>运行时 O(1) 查表"]
+        end
+        
+        A --> Pipeline[异步 IO 管线]
+        B --> Pipeline
+        Pipeline --> Cache[三级缓存调度]
+        Cache --> C
+        D --> Cache
+        Cache --> GPU[GPU 渲染]
+    end
+    
+    style A fill:#1a1a2e,stroke:#e94560,color:#eee
+    style B fill:#1a1a2e,stroke:#0f3460,color:#eee
+    style C fill:#1a1a2e,stroke:#16213e,color:#eee
+    style D fill:#1a1a2e,stroke:#533483,color:#eee
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                      HyperStream 架构                            │
-│                                                                  │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐           │
-│  │ 极简Chunk格式 │  │ 激进异步IO   │  │ 三级缓存系统 │           │
-│  │              │  │              │  │              │           │
-│  │ • 64B Header │  │ • io_uring   │  │ • L1 热(VRAM)│           │
-│  │ • Zstd 压缩  │  │ • IOCP       │  │ • L2 温(VRAM)│           │
-│  │ • LOD分块    │  │ • Direct I/O │  │ • L3 冷(RAM) │           │
-│  │ • XXH64校验  │  │ • 256并发    │  │ • 激进淘汰   │           │
-│  │ • 预计算优先级│  │ • 零拷贝     │  │ • Mip自适应   │           │
-│  └──────────────┘  └──────────────┘  └──────────────┘           │
-│                                                                  │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │              预测预加载引擎                                │   │
-│  │  • 卡尔曼滤波 (2秒前向预测)                               │   │
-│  │  • 速度自适应 (静止→步行→奔跑→驾驶→飞行 五档策略)        │   │
-│  │  • 预计算流式优先级图 (离线烘焙，运行时 O(1) 查表)       │   │
-│  └──────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
+
+### HyperStream 数据流
+
+```mermaid
+sequenceDiagram
+    participant Disk as 💾 NVMe SSD
+    participant IO as ⚡ IO Thread Pool
+    participant Cache as 🗄️ Cache Manager
+    participant GPU as 🎮 GPU VRAM
+    participant Render as 🖼️ Render Thread
+
+    Note over Disk,Render: 玩家高速移动触发 Chunk 加载
+    
+    Render->>Cache: 查询 Chunk(12,5)
+    Cache->>Cache: O(1) 查预计算优先级表
+    Cache-->>Render: L1/L2 命中 → 直接返回 (0ms)
+    
+    Cache-->>IO: L1/L2 Miss → 提交 IO 请求
+    IO->>Disk: Direct I/O (绕过 OS 缓存)
+    Disk-->>IO: 批量读取 256 Chunk
+    IO->>GPU: Compute Shader 解压 Zstd
+    GPU-->>Cache: 解压数据写入 VRAM
+    Cache-->>Render: Chunk 就绪通知
+    
+    Note over Disk,Render: 总延迟 < 16ms (1帧内完成)
 ```
 
 ### 性能基准：HyperStream vs UE5 World Partition
@@ -79,33 +146,96 @@ HyperStream 是星穹引擎独有的超大地图流式加载系统。它不是 U
 
 星穹引擎采用**四层松耦合分层架构**，每层通过明确定义的 C++ 接口通信，可独立演进、独立测试。
 
+### 四层架构图
+
+```mermaid
+graph TB
+    subgraph L4["Layer 4 · 应用开发接口层 (Application SDK)"]
+        direction LR
+        L4A["🔧 C++ / Lua 脚本 API"]
+        L4B["🎨 Dear ImGui 场景编辑器"]
+        L4C["📦 glTF 2.0 → Pak 资产管线"]
+    end
+
+    subgraph L3["Layer 3 · 虚拟世界引擎层 (Virtual World Engine)"]
+        direction LR
+        L3A["⚡ HyperStream 流式加载"]
+        L3B["🧩 ECS 实体管理<br/>(EnTT)"]
+        L3C["⚙️ Jolt Physics<br/>刚体 / 碰撞"]
+        L3D["🤖 AI 导航<br/>(Recast/Detour)"]
+        L3E["🌐 QUIC Network<br/>C/S + AOI"]
+    end
+
+    subgraph L2["Layer 2 · 实时渲染核心层 (Rendering Core)"]
+        direction LR
+        L2A["🎯 PBR 渲染管线"]
+        L2B["💡 RT 光线追踪"]
+        L2C["🚀 GPU-Driven 剔除"]
+        L2D["🌑 CSM 级联阴影"]
+        L2E["✨ 后处理链"]
+    end
+
+    subgraph L1["Layer 1 · 硬件抽象层 (HAL · PC)"]
+        direction LR
+        L1A["🔺 Vulkan 1.4+"]
+        L1B["🔲 DirectX 12 Ultimate"]
+        L1C["💾 VMA 显存管理"]
+        L1D["🖥️ GLFW / SDL3 窗口"]
+    end
+
+    L4 -->|"场景描述 (JSON/二进制) + 脚本 IR"| L3
+    L3 -->|"渲染命令缓冲 + 实体状态快照 (Protobuf)"| L2
+    L2 -->|"GPU 命令列表 + 资源句柄 (uint64_t)"| L1
+
+    style L4 fill:#1b4332,stroke:#40916c,color:#d8f3dc
+    style L3 fill:#1a1a2e,stroke:#e94560,color:#eee
+    style L2 fill:#0d1b2a,stroke:#1b98f5,color:#e0e1dd
+    style L1 fill:#1b263b,stroke:#778da9,color:#e0e1dd
 ```
-┌──────────────────────────────────────────────────────────────┐
-│  Layer 4: 应用开发接口层 (Application SDK)                    │
-│  ┌─────────────┐  ┌──────────────┐  ┌────────────────────┐  │
-│  │ C++ / Lua   │  │ Dear ImGui   │  │ glTF 2.0 → Pak    │  │
-│  │ 脚本 API    │  │ 场景编辑器    │  │ 资产编译管线       │  │
-│  └─────────────┘  └──────────────┘  └────────────────────┘  │
-├──────────────────────────────────────────────────────────────┤
-│  Layer 3: 虚拟世界引擎层 (Virtual World Engine)               │
-│  ┌───────────┐ ┌────────┐ ┌────────┐ ┌──────┐ ┌─────────┐  │
-│  │ ⚡Hyper-  │ │  ECS   │ │  Jolt  │ │  AI  │ │  QUIC   │  │
-│  │  Stream   │ │ (EnTT) │ │ Physics│ │(Recast│ │ Network │  │
-│  │ 流式加载  │ │        │ │        │ │Detour)│ │         │  │
-│  └───────────┘ └────────┘ └────────┘ └──────┘ └─────────┘  │
-├──────────────────────────────────────────────────────────────┤
-│  Layer 2: 实时渲染核心层 (Rendering Core)                     │
-│  ┌──────────┐ ┌───────┐ ┌──────────┐ ┌──────┐ ┌─────────┐  │
-│  │   PBR    │ │  RT   │ │ GPU-     │ │ CSM  │ │  Post-  │  │
-│  │  管线    │ │ 反射  │ │ Driven   │ │ 阴影 │ │ Process │  │
-│  └──────────┘ └───────┘ └──────────┘ └──────┘ └─────────┘  │
-├──────────────────────────────────────────────────────────────┤
-│  Layer 1: 硬件抽象层 (HAL)                                    │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌───────────────┐   │
-│  │ Vulkan   │ │   DX12   │ │   VMA    │ │  GLFW / SDL3 │   │
-│  │  1.4+    │ │ Ultimate │ │ 显存管理 │ │  窗口 + 输入  │   │
-│  └──────────┘ └──────────┘ └──────────┘ └───────────────┘   │
-└──────────────────────────────────────────────────────────────┘
+
+### 层间通信协议
+
+```mermaid
+graph LR
+    subgraph Protocol["层间通信标准"]
+        P1["L4 → L3<br/>场景描述 JSON + 脚本中间码 IR"]
+        P2["L3 → L2<br/>渲染命令缓冲区 + Protobuf 快照"]
+        P3["L2 → L1<br/>GPU 命令列表 + RHI 资源句柄"]
+    end
+    
+    subgraph Rules["依赖规则"]
+        R1["单向依赖: L4 → L3 → L2 → L1"]
+        R2["回调通知: L1 → L2 → L3 → L4"]
+        R3["禁止反向 include"]
+        R4["禁止全局变量跨层通信"]
+    end
+    
+    style P1 fill:#2d6a4f,color:#d8f3dc
+    style P2 fill:#1b4332,color:#d8f3dc
+    style P3 fill:#081c15,color:#d8f3dc
+```
+
+### 每帧渲染流水线
+
+```mermaid
+graph LR
+    A["🔍 Depth<br/>Pre-Pass<br/>0.5ms"] --> B["🎨 GBuffer<br/>Pass<br/>2.0ms"]
+    B --> C["🌑 Shadow<br/>Maps ×4<br/>2.0ms"]
+    B --> D["💡 Clustered<br/>Lighting<br/>2.5ms"]
+    C --> D
+    D --> E["🌫️ SSAO<br/>0.8ms"]
+    E --> F["✨ Bloom<br/>0.4ms"]
+    F --> G["🎯 TAA<br/>0.5ms"]
+    G --> H["🖼️ Present<br/>—"]
+
+    style A fill:#0d1b2a,stroke:#1b98f5,color:#e0e1dd
+    style B fill:#0d1b2a,stroke:#1b98f5,color:#e0e1dd
+    style C fill:#1a1a2e,stroke:#e94560,color:#eee
+    style D fill:#1a1a2e,stroke:#e94560,color:#eee
+    style E fill:#1b263b,stroke:#778da9,color:#e0e1dd
+    style F fill:#1b263b,stroke:#778da9,color:#e0e1dd
+    style G fill:#1b263b,stroke:#778da9,color:#e0e1dd
+    style H fill:#2d6a4f,stroke:#40916c,color:#d8f3dc
 ```
 
 ### 设计哲学
@@ -125,6 +255,14 @@ HyperStream 是星穹引擎独有的超大地图流式加载系统。它不是 U
 
 ### 核心语言
 
+```mermaid
+pie title 代码量占比 (估算)
+    "C++20/23 · 引擎核心" : 70
+    "Python 3.12+ · 工具链" : 15
+    "HLSL · GPU Shader" : 10
+    "Lua 5.4 · 游戏脚本" : 5
+```
+
 | 语言 | 使用场景 | 占比 |
 |------|---------|:---:|
 | **C++20/23** | 引擎核心：渲染管线、物理引擎、ECS、网络层、资源管理 | 70% |
@@ -132,7 +270,7 @@ HyperStream 是星穹引擎独有的超大地图流式加载系统。它不是 U
 | **Python 3.12+** | 资产管线工具、自动化测试、CI/CD 脚本 | 15% |
 | **Lua 5.4** | 游戏逻辑热更新脚本 (通过 Sol3 绑定) | 5% |
 
-### 核心依赖
+### 核心依赖 (28 个开源库)
 
 | 类别 | 库 | 版本 | 用途 | License |
 |------|---|------|------|:---:|
@@ -166,11 +304,26 @@ HyperStream 是星穹引擎独有的超大地图流式加载系统。它不是 U
 
 ### 为什么选 C++ 而不是 Rust / Zig / Go？
 
-C++ 在实时图形和游戏引擎领域拥有**无可替代的生态优势**：
-- Vulkan SDK、Jolt Physics、EnTT、Dear ImGui、GLM 全部是 C++ 原生
-- Rust 的 FFI 在渲染密集场景下有显著的跨语言调用开销
-- Zig 生态极不成熟，缺乏生产级图形/物理库
-- Go 的 GC 停顿与 16.6ms 帧预算天生矛盾
+```mermaid
+graph TB
+    Q["❓ 引擎核心用什么语言？"] --> C1["Rust"]
+    Q --> C2["Zig"]
+    Q --> C3["Go"]
+    Q --> C4["🟢 C++20/23"]
+
+    C1 --> R1["Vulkan SDK 无原生绑定<br/>FFI 开销在渲染热路径不可接受"]
+    C2 --> R2["生态极不成熟<br/>无生产级图形/物理库"]
+    C3 --> R3["GC 停顿与 16.6ms 帧预算<br/>天生矛盾"]
+
+    C4 --> R4["✅ Vulkan/Jolt/EnTT/ImGui<br/>全部 C++ 原生<br/>零 FFI 开销"]
+
+    style Q fill:#1a1a2e,stroke:#e94560,color:#eee
+    style C1 fill:#ff6b6b,color:#fff
+    style C2 fill:#ff6b6b,color:#fff
+    style C3 fill:#ff6b6b,color:#fff
+    style C4 fill:#51cf66,color:#000
+    style R4 fill:#2d6a4f,color:#d8f3dc
+```
 
 > **我们爱 Rust 的内存安全，爱 Zig 的编译期计算，爱 Go 的并发模型。但现实是：在实时渲染领域，C++ 是唯一成熟的选择。** 我们通过严格的 RAII、智能指针、clang-tidy 静态分析来尽可能弥补 C++ 的内存安全短板。
 
@@ -178,7 +331,7 @@ C++ 在实时图形和游戏引擎领域拥有**无可替代的生态优势**：
 
 ## ✨ 核心功能
 
-### 渲染
+### 🎯 渲染
 
 - **PBR 渲染管线** — Cook-Torrance BRDF + GGX 法线分布 + Smith 几何遮蔽，兼容 glTF 2.0 PBR 标准
 - **GBuffer 架构** — 4 张渲染目标 (128 bits/pixel)：BaseColor+Metallic / Normal+Roughness / Emissive+AO / MotionVector
@@ -201,7 +354,7 @@ C++ 在实时图形和游戏引擎领域拥有**无可替代的生态优势**：
 - **预计算流式优先级图** — 离线烘焙可见性/可达性 → 运行时 O(1) 查表调度
 - **无缝 Chunk 切换** — < 16ms (单帧完成，零感知卡顿)
 
-### 物理
+### ⚙️ 物理
 
 - **Jolt Physics 集成** — AAA 级刚体动力学 (Horizon Forbidden West 验证)
 - **6 种碰撞形状** — 球体 / 盒体 / 胶囊体 / 凸包 / 三角网格 / 复合形状
@@ -209,13 +362,32 @@ C++ 在实时图形和游戏引擎领域拥有**无可替代的生态优势**：
 - **8 层碰撞过滤** — 位标志碰撞层 + 碰撞矩阵 + Trigger vs Physics 分离
 - **4 种约束** — 铰链 / 弹簧 / 滑轨 / 固定
 
-### AI 与导航
+### 🤖 AI 与导航
 
 - **Recast/Detour 导航** — 体素化 (0.3m/cell) → Watershed 区域分割 → 凸多边形化 → Detour A* 寻路
 - **行为树系统** — Selector / Sequence / Parallel / Decorator / Condition / Action 节点
 - **黑板模式** — 键值存储，节点间共享决策数据
 
-### 网络
+### 🌐 网络
+
+```mermaid
+sequenceDiagram
+    participant Client as 🎮 客户端 A
+    participant Server as 🖥️ 专用服务器
+    participant ClientB as 🎮 客户端 B
+
+    loop 每帧 30Hz
+        Client->>Server: InputPacket (按键/鼠标/手柄)
+        ClientB->>Server: InputPacket
+        Server->>Server: 物理步进 + AOI 过滤
+        Server->>Client: StateSnapshot (AOI 范围内实体)
+        Server->>ClientB: StateSnapshot
+        Client->>Client: 客户端预测 + 回滚校验
+        ClientB->>ClientB: 实体插值渲染
+    end
+    
+    Note over Client,ClientB: 延迟 < 100ms · 带宽 < 5Mbps/客户端
+```
 
 - **QUIC 传输** — 0-RTT 握手 + 多路复用无 HOL 阻塞 + 内建 TLS 1.3
 - **服务器权威模型** — 输入上传 → 服务器物理模拟 → 状态下发
@@ -223,7 +395,7 @@ C++ 在实时图形和游戏引擎领域拥有**无可替代的生态优势**：
 - **AOI 九宫格** — 64m×64m Cell 空间过滤，带宽 < 5 Mbps/客户端
 - **Headless 专用服务器** — Linux 无窗口部署，Docker 容器化
 
-### 编辑器和工具链
+### 🔧 编辑器和工具链
 
 - **Dear ImGui 编辑器** — Docking 布局：Outliner + 3D Viewport + Property Panel + Asset Browser
 - **ImGuizmo 操纵器** — 平移 (W) / 旋转 (E) / 缩放 (R) 三维操作
@@ -372,36 +544,49 @@ end
 
 ## 🗺️ 路线图
 
-### 当前阶段：MVP 开发中
+### 开发阶段总览
 
-```
-Phase 1 ✅ (2026 Q3-Q4)  地基期
-  └─ C++20 基础设施 + 3D 数学库 + Vulkan 初始化 + 第一个三角形
+```mermaid
+gantt
+    title 星穹引擎 · 开发路线图
+    dateFormat  YYYY-MM
+    axisFormat  %y年%m月
 
-Phase 2 🔄 (2026 Q4-2027 Q2)  渲染管线
-  └─ PBR + CSM 阴影 + HDR + GPU-Driven + RenderGraph + TAA
+    section Phase 1 · 地基
+    C++20 基础设施 + 3D 数学库     :done, p1a, 2026-07, 4M
+    Vulkan 初始化 · 第一个三角形    :done, p1b, 2026-11, 1M
 
-Phase 3 📋 (2027 Q2-Q4)  引擎内核 + ⚡ HyperStream
-  └─ ECS + Jolt Physics + HyperStream 核心 + AI 导航 + 3D 音频
+    section Phase 2 · 渲染管线
+    PBR + CSM 阴影 + HDR          :active, p2a, 2026-12, 4M
+    GPU-Driven + RenderGraph + TAA :p2b, 2027-04, 3M
 
-Phase 4 📋 (2027 Q4-2028 Q1)  多人网络
-  └─ QUIC + 服务器权威 + 预测回滚 + AOI + Headless 服务器
+    section Phase 3 · 引擎 + HyperStream
+    ECS + Jolt Physics 基础       :p3a, 2027-07, 2M
+    ⚡ HyperStream 核心开发        :crit, p3b, 2027-09, 3M
+    ⚡ HyperStream Benchmark      :milestone, p3bm, 2027-12, 0M
+    AI 导航 + 3D 音频             :p3c, 2027-12, 2M
 
-Phase 5 📋 (2028 Q1-2029 Q1)  编辑器与工具链
-  └─ ImGui 编辑器 + Lua 脚本 + glTF 管线 + Pak 打包
+    section Phase 4 · 多人网络
+    QUIC + 状态同步 + 预测回滚     :p4a, 2028-02, 3M
+    AOI + Headless Server         :p4b, 2028-05, 2M
+
+    section Phase 5 · 编辑器工具链
+    ImGui 编辑器 + Lua 脚本       :p5a, 2028-07, 3M
+    glTF 管线 + Pak 打包          :p5b, 2028-10, 3M
+    v1.0 正式发布                  :milestone, p5m, 2029-04, 0M
 ```
 
 ### 里程碑
 
 | 里程碑 | 日期 | 交付物 |
 |--------|:----:|--------|
-| **M1: 画出三角形** | 2026.11 | Vulkan 初始化框架 |
+| **M1: 画出三角形** | 2026.11 | Vulkan 初始化框架跑通 |
 | **M2: PBR 渲染器** | 2027.03 | glTF 模型 PBR 正确渲染 |
 | **M3: GPU-Driven 管线** | 2027.05 | RenderGraph + GPU-Driven 剔除 |
-| **M3.5: ⚡ HyperStream Benchmark** | 2027.08 | HyperStream 全部指标达标 (vs UE5 对比报告) |
-| **M4: 引擎内核** | 2027.12 | ECS + 物理 + Chunk 流式整合 |
-| **M5: 多人 Demo** | 2028.08 | 10 人同屏在线可互动 |
-| **M6: v1.0 发布** | 2029.04 | 编辑器可用 + 打包发布 |
+| **M3.5: ⚡ HyperStream Benchmark** | 2027.12 | HyperStream 全部指标达标 (vs UE5 对比报告) |
+| **M4: 引擎内核** | 2028.02 | ECS + 物理 + Chunk 流式整合 |
+| **M5: 多人 Demo** | 2028.07 | 10 人同屏在线可互动 |
+| **M6: v1.0 发布** | 2029.04 | 编辑器可用 + 打包发布 + HyperStream 性能报告 |
 
 ---
 
